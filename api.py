@@ -9,7 +9,6 @@ load_dotenv("conf/.env")
 import os
 
 from biz.api import api_app, init_app
-from biz.api.scheduler import setup_scheduler
 from biz.utils.config_checker import check_config
 
 # 初始化应用并注册路由
@@ -17,8 +16,6 @@ init_app(api_app)
 
 if __name__ == '__main__':
     check_config()
-    # 启动定时任务调度器
-    setup_scheduler()
 
     # 启动Flask API服务
     port = int(os.environ.get('SERVER_PORT', 5001))

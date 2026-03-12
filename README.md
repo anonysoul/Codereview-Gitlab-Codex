@@ -11,8 +11,6 @@
 
 - 🚀 多模型支持
   - 兼容 DeepSeek、ZhipuAI、OpenAI、Anthropic、通义千问 和 Ollama，想用哪个就用哪个。
-- 📅 自动化日报生成
-  - 基于 GitLab & GitHub & Gitea Commit 记录，自动整理每日开发进展，谁在摸鱼、谁在卷，一目了然 😼。
 - 📊 可视化 Dashboard
   - 集中展示所有 Code Review 记录，项目统计、开发者统计，数据说话，甩锅无门！
 - 🎭 Review Style 任你选
