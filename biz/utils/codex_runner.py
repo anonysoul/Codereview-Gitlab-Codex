@@ -110,21 +110,33 @@ class CodexReviewRunner:
     @staticmethod
     def _extract_review_result(stdout_chunks: list[str], stderr_chunks: list[str]) -> str:
         stdout_text = "".join(stdout_chunks).strip()
-        if stdout_text:
-            return stdout_text
+        extracted_stdout = CodexReviewRunner._extract_review_section(stdout_text)
+        if extracted_stdout:
+            return extracted_stdout
 
         stderr_text = "".join(stderr_chunks).strip()
         if not stderr_text:
             return ""
 
-        marker = "Review comment:"
-        marker_index = stderr_text.find(marker)
-        if marker_index >= 0:
-            comment = stderr_text[marker_index + len(marker):].strip()
-            if comment:
-                return comment
+        extracted_stderr = CodexReviewRunner._extract_review_section(stderr_text)
+        if extracted_stderr:
+            return extracted_stderr
 
         return stderr_text
+
+    @staticmethod
+    def _extract_review_section(text: str) -> str:
+        if not text:
+            return ""
+
+        for marker in ("Full review comments:", "Review comment:"):
+            marker_index = text.find(marker)
+            if marker_index >= 0:
+                comment = text[marker_index + len(marker):].strip()
+                if comment:
+                    return comment
+
+        return text.strip()
 
     def _ensure_chinese_output(self, codex_path: str, repo_path: str, review_result: str) -> str:
         if self._contains_cjk(review_result):

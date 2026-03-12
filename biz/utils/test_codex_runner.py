@@ -82,6 +82,27 @@ class TestCodexReviewRunner(TestCase):
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
     @patch("biz.utils.codex_runner.subprocess.run")
     @patch("biz.utils.codex_runner.subprocess.Popen")
+    def test_review_prefers_full_review_comments_section(self, mock_popen, mock_run, _mock_which):
+        process = MagicMock()
+        process.stdout = StringIO("")
+        process.stderr = StringIO(
+            "OpenAI Codex v0.114.0\n"
+            "some execution logs\n"
+            "Full review comments:\n\n"
+            "[P1] Fix login flow\n"
+            "Detailed explanation.\n"
+        )
+        process.wait.return_value = 0
+        mock_popen.return_value = process
+        mock_run.return_value = MagicMock(returncode=0, stdout="[P1] 修复登录流程\n详细说明。", stderr="")
+
+        result = CodexReviewRunner().review("/tmp/repo", "origin/main")
+
+        self.assertEqual(result, "[P1] 修复登录流程\n详细说明。")
+
+    @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
+    @patch("biz.utils.codex_runner.subprocess.run")
+    @patch("biz.utils.codex_runner.subprocess.Popen")
     def test_review_uses_env_prompt_when_present(self, mock_popen, mock_run, _mock_which):
         process = MagicMock()
         process.stdout = StringIO("ok")
