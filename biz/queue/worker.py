@@ -4,6 +4,7 @@ from datetime import datetime
 
 from biz.entity.review_entity import MergeRequestReviewEntity
 from biz.event.event_manager import event_manager
+from biz.platforms.gitlab.repo_cache import GitLabRepoCacheManager
 from biz.platforms.gitlab.review_trigger import should_review_gitlab_merge_request
 from biz.platforms.gitlab.webhook_handler import MergeRequestHandler, filter_changes
 from biz.service.review_service import ReviewService
@@ -69,6 +70,17 @@ def handle_merge_request_event(
                     project_name,
                 )
                 return
+
+        repo_preparation = GitLabRepoCacheManager(gitlab_url, gitlab_token).prepare_merge_request_repo(
+            webhook_data
+        )
+        logger.info(
+            "Prepared cached repository for MR review: %s (source=%s target=%s commit=%s)",
+            repo_preparation.local_path,
+            repo_preparation.source_branch,
+            repo_preparation.target_branch,
+            repo_preparation.last_commit_id,
+        )
 
         changes = handler.get_merge_request_changes()
         logger.info('changes: %s', changes)

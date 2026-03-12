@@ -1,0 +1,184 @@
+import base64
+import os
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import quote, urljoin
+
+import requests
+
+from biz.platforms.gitlab.webhook_handler import slugify_url
+from biz.utils.log import logger
+
+
+DEFAULT_CACHE_DIR = "~/.cache/codereview"
+
+
+@dataclass
+class RepoPreparationResult:
+    local_path: str
+    project_path: str
+    clone_url: str
+    target_branch: str
+    source_branch: str
+    last_commit_id: str
+
+
+def get_cache_root() -> Path:
+    cache_dir = os.getenv("CODEREVIEW_CACHE_DIR", DEFAULT_CACHE_DIR)
+    return Path(os.path.expanduser(cache_dir)).resolve()
+
+
+def build_repo_cache_dirname(gitlab_url: str, project_path: str) -> str:
+    host_slug = slugify_url(gitlab_url.rstrip("/"))
+    project_slug = slugify_url(project_path.strip("/"))
+    return f"{host_slug}__{project_slug}"
+
+
+class GitLabRepoCacheManager:
+    def __init__(self, gitlab_url: str, gitlab_token: str):
+        self.gitlab_url = gitlab_url.rstrip("/")
+        self.gitlab_token = gitlab_token
+
+    def prepare_merge_request_repo(self, webhook_data: dict) -> RepoPreparationResult:
+        object_attributes = webhook_data.get("object_attributes", {})
+        target_branch = object_attributes.get("target_branch", "")
+        source_branch = object_attributes.get("source_branch", "")
+        last_commit_id = object_attributes.get("last_commit", {}).get("id", "")
+        project_id = self._get_project_id(webhook_data)
+
+        if not project_id:
+            raise ValueError("Missing GitLab project id in merge request webhook payload.")
+        if not target_branch or not source_branch:
+            raise ValueError("Missing source or target branch in merge request webhook payload.")
+        if not last_commit_id:
+            raise ValueError("Missing last_commit.id in merge request webhook payload.")
+
+        project_info = self._get_project_info(webhook_data, project_id)
+        project_path = project_info["project_path"]
+        clone_url = project_info["clone_url"]
+        local_path = self._ensure_repo(clone_url, project_path)
+
+        self._sync_merge_request_refs(local_path, target_branch, source_branch, last_commit_id)
+
+        return RepoPreparationResult(
+            local_path=str(local_path),
+            project_path=project_path,
+            clone_url=clone_url,
+            target_branch=target_branch,
+            source_branch=source_branch,
+            last_commit_id=last_commit_id,
+        )
+
+    def _get_project_id(self, webhook_data: dict):
+        project = webhook_data.get("project", {})
+        object_attributes = webhook_data.get("object_attributes", {})
+        return (
+            project.get("id")
+            or object_attributes.get("target_project_id")
+            or object_attributes.get("source_project_id")
+        )
+
+    def _get_project_info(self, webhook_data: dict, project_id) -> dict:
+        project = webhook_data.get("project", {})
+        object_attributes = webhook_data.get("object_attributes", {})
+
+        project_path = (
+            project.get("path_with_namespace")
+            or object_attributes.get("target", {}).get("path_with_namespace")
+            or object_attributes.get("source", {}).get("path_with_namespace")
+        )
+        clone_url = (
+            project.get("git_http_url")
+            or project.get("http_url")
+            or webhook_data.get("repository", {}).get("git_http_url")
+            or webhook_data.get("repository", {}).get("homepage")
+        )
+
+        if project_path and clone_url:
+            return {
+                "project_path": project_path,
+                "clone_url": self._normalize_clone_url(clone_url),
+            }
+
+        api_project = self._fetch_project(project_id)
+        api_project_path = api_project.get("path_with_namespace")
+        api_clone_url = api_project.get("http_url_to_repo")
+        if not api_project_path or not api_clone_url:
+            raise ValueError(f"Failed to resolve GitLab project info for project_id={project_id}.")
+
+        return {
+            "project_path": api_project_path,
+            "clone_url": self._normalize_clone_url(api_clone_url),
+        }
+
+    def _fetch_project(self, project_id) -> dict:
+        project_ref = quote(str(project_id), safe="")
+        url = urljoin(f"{self.gitlab_url}/", f"api/v4/projects/{project_ref}")
+        headers = {"Private-Token": self.gitlab_token}
+        response = requests.get(url, headers=headers, verify=False, timeout=30)
+        logger.debug("Get project response from gitlab: %s, %s", response.status_code, response.text)
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Failed to get project info from GitLab: {response.status_code}, {response.text}"
+            )
+        return response.json()
+
+    def _normalize_clone_url(self, clone_url: str) -> str:
+        if clone_url.endswith(".git"):
+            return clone_url
+        return f"{clone_url.rstrip('/')}.git"
+
+    def _ensure_repo(self, clone_url: str, project_path: str) -> Path:
+        cache_root = get_cache_root()
+        cache_root.mkdir(parents=True, exist_ok=True)
+        repo_dir = cache_root / build_repo_cache_dirname(self.gitlab_url, project_path)
+
+        if not (repo_dir / ".git").exists():
+            logger.info("Cloning GitLab repository into cache: %s", repo_dir)
+            self._run_git(
+                ["clone", clone_url, str(repo_dir)],
+                cwd=cache_root,
+            )
+            return repo_dir
+
+        logger.info("Refreshing cached GitLab repository: %s", repo_dir)
+        self._run_git(["remote", "set-url", "origin", clone_url], cwd=repo_dir)
+        self._run_git(["fetch", "--prune", "origin"], cwd=repo_dir)
+        return repo_dir
+
+    def _sync_merge_request_refs(
+        self,
+        repo_dir: Path,
+        target_branch: str,
+        source_branch: str,
+        last_commit_id: str,
+    ):
+        self._run_git(
+            ["fetch", "--prune", "origin", target_branch, source_branch],
+            cwd=repo_dir,
+        )
+        self._run_git(["checkout", "--force", last_commit_id], cwd=repo_dir)
+        self._run_git(["clean", "-fd"], cwd=repo_dir)
+
+    def _git_env(self) -> dict:
+        env = os.environ.copy()
+        auth = base64.b64encode(f"oauth2:{self.gitlab_token}".encode("utf-8")).decode("ascii")
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_HTTP_EXTRA_HEADER"] = f"AUTHORIZATION: Basic {auth}"
+        return env
+
+    def _run_git(self, args: list[str], cwd: Path):
+        command = ["git", *args]
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            env=self._git_env(),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Git command failed: {' '.join(command)}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            )
