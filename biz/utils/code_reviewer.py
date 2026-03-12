@@ -4,7 +4,6 @@ import re
 from typing import Dict, Any, List
 
 import yaml
-from jinja2 import Template
 
 from biz.llm.factory import Factory
 from biz.utils.log import logger
@@ -16,9 +15,9 @@ class BaseReviewer(abc.ABC):
 
     def __init__(self, prompt_key: str):
         self.client = Factory().getClient()
-        self.prompts = self._load_prompts(prompt_key, os.getenv("REVIEW_STYLE", "professional"))
+        self.prompts = self._load_prompts(prompt_key)
 
-    def _load_prompts(self, prompt_key: str, style="professional") -> Dict[str, Any]:
+    def _load_prompts(self, prompt_key: str) -> Dict[str, Any]:
         """加载提示词配置"""
         prompt_templates_file = "conf/prompt_templates.yml"
         try:
@@ -26,16 +25,9 @@ class BaseReviewer(abc.ABC):
             with open(prompt_templates_file, "r", encoding="utf-8") as file:
                 prompts = yaml.safe_load(file).get(prompt_key, {})
 
-                # 使用Jinja2渲染模板
-                def render_template(template_str: str) -> str:
-                    return Template(template_str).render(style=style)
-
-                system_prompt = render_template(prompts["system_prompt"])
-                user_prompt = render_template(prompts["user_prompt"])
-
                 return {
-                    "system_message": {"role": "system", "content": system_prompt},
-                    "user_message": {"role": "user", "content": user_prompt},
+                    "system_message": {"role": "system", "content": prompts["system_prompt"]},
+                    "user_message": {"role": "user", "content": prompts["user_prompt"]},
                 }
         except (FileNotFoundError, KeyError, yaml.YAMLError) as e:
             logger.error(f"加载提示词配置失败: {e}")
@@ -105,4 +97,3 @@ class CodeReviewer(BaseReviewer):
             return 0
         match = re.search(r"总分[:：]\s*(\d+)分?", review_text)
         return int(match.group(1)) if match else 0
-
