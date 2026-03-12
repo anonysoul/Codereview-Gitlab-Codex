@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -15,6 +16,12 @@ DEFAULT_CODEX_REVIEW_PROMPT = (
 DEFAULT_EMPTY_REVIEW_RESULT = (
     "未发现阻塞性问题。\n"
     "Codex 本次未返回详细审查内容，请人工复核关键边界场景、回归影响和测试覆盖。"
+)
+
+DEFAULT_TRANSLATION_PROMPT_TEMPLATE = (
+    "请将下面的 GitLab Merge Request 审查意见翻译成简洁、专业、自然的中文，"
+    "保留问题级别、文件路径、项目符号和代码标识，不要补充原文没有的新结论。\n\n"
+    "{review_text}"
 )
 
 
@@ -43,15 +50,17 @@ class CodexReviewRunner:
 
         command = [codex_path, "review", "--base", base_ref, self.prompt]
         try:
-            return self._run_review_command(command, repo_path, base_ref)
+            review_result = self._run_review_command(command, repo_path, base_ref)
         except RuntimeError as exc:
             if self._should_retry_without_prompt(exc):
                 retry_command = [codex_path, "review", "--base", base_ref]
                 logger.warning(
                     "Codex CLI rejected review prompt with --base, retrying without custom prompt."
                 )
-                return self._run_review_command(retry_command, repo_path, base_ref)
-            raise
+                review_result = self._run_review_command(retry_command, repo_path, base_ref)
+            else:
+                raise
+        return self._ensure_chinese_output(codex_path, repo_path, review_result)
 
     def _run_review_command(self, command: list[str], repo_path: str, base_ref: str) -> str:
         logger.info("Running Codex review in %s against %s", repo_path, base_ref)
@@ -116,3 +125,39 @@ class CodexReviewRunner:
                 return comment
 
         return stderr_text
+
+    def _ensure_chinese_output(self, codex_path: str, repo_path: str, review_result: str) -> str:
+        if self._contains_cjk(review_result):
+            return review_result
+
+        translated = self._translate_review_result(codex_path, repo_path, review_result)
+        return translated or review_result
+
+    def _translate_review_result(self, codex_path: str, repo_path: str, review_result: str) -> str:
+        prompt = DEFAULT_TRANSLATION_PROMPT_TEMPLATE.format(review_text=review_result)
+        command = [codex_path, "exec", "-"]
+        logger.info("Translating Codex review output to Chinese in %s", repo_path)
+        result = subprocess.run(
+            command,
+            cwd=repo_path,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "Failed to translate Codex review output to Chinese: %s",
+                result.stderr.strip() or result.stdout.strip(),
+            )
+            return ""
+
+        translated = result.stdout.strip()
+        if not translated:
+            logger.warning("Codex translation returned empty output, keeping original review result.")
+            return ""
+        return translated
+
+    @staticmethod
+    def _contains_cjk(text: str) -> bool:
+        return bool(re.search(r"[\u4e00-\u9fff]", text))
