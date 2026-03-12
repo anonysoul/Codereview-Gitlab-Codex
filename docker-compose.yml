@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: app
     image: ghcr.io/sunmh207/ai-codereview-gitlab:1.4.1
     ports:
       - "5001:5001"
@@ -13,4 +12,6 @@ services:
       - ./log:/app/log
     env_file:
       - ./conf/.env
+    environment:
+      CODEREVIEW_CACHE_DIR: /app/data/cache
     restart: unless-stopped

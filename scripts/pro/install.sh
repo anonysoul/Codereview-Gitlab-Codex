@@ -11,8 +11,8 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-curl -fsSL https://raw.githubusercontent.com/sunmh207/AI-Codereview-Gitlab/refs/heads/main/scripts/pro/docker-compose.yml \
-| docker compose -f - up -d
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d
 
 echo
 echo "✅ 启动成功"

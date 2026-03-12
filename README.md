@@ -1,201 +1,78 @@
-![Push图片](doc/img/open/ai-codereview-cartoon.png)
+# GitLab Codex Review
 
-[开源版](README.md) | 
-[Pro版](doc/pro.md)
+仅支持 GitLab Merge Request 的自动审查服务。
 
-## 项目简介
+主链路是：GitLab `merge_request` webhook -> 拉取或复用本地仓库缓存 -> checkout 到 webhook 的 `last_commit.id` -> 执行 `codex review --base origin/<target_branch>` -> 将结果作为单条 MR note 回帖 -> 写入审查日志。
 
-本项目是一个基于大模型的自动化代码审查工具，帮助开发团队在代码合并或提交时，快速进行智能化的审查(Code Review)，提升代码质量和开发效率。
+## 当前范围
 
-## 功能
+- 只支持 GitLab，不支持其他代码托管平台。
+- 只处理 Merge Request，不处理 Push。
+- 审查执行器只使用本机 `codex` CLI，不再接入第三方 LLM SDK。
+- Dashboard 只展示 Merge Request 审查日志。
 
-- 🚀 多模型支持
-  - 兼容 DeepSeek、ZhipuAI、OpenAI、Anthropic、通义千问 和 Ollama，想用哪个就用哪个。
-- 📊 可视化 Dashboard
-  - 集中展示所有 Code Review 记录，项目统计、开发者统计，数据说话，甩锅无门！
-- 🎭 Review Style
-  - 专业型 🤵：严谨细致，正式专业。
+## 运行要求
 
-**效果图:**
+- Python 3.10+
+- 本机已安装 `git`
+- 本机已安装 `codex`，并且服务进程可直接调用
 
-![MR图片](doc/img/open/mr.png)
+## 关键配置
 
-![Note图片](doc/img/open/note.jpg)
+复制配置模板：
 
-![Dashboard图片](doc/img/open/dashboard.jpg)
-
-## 原理
-
-当用户在 GitLab 上提交代码（如 Merge Request 或 Push 操作）时，GitLab 将自动触发 webhook
-事件，调用本系统的接口。系统随后通过第三方大模型对代码进行审查，并将审查结果直接反馈到对应的 Merge Request 或 Commit 的
-Note 中，便于团队查看和处理。
-
-![流程图](doc/img/open/process.png)
-
-## 部署
-
-### 方案一：Docker 部署
-
-**1. 准备环境文件**
-
-- 克隆项目仓库：
-```aiignore
-git clone https://github.com/sunmh207/AI-Codereview-Gitlab.git
-cd AI-Codereview-Gitlab
-```
-
-- 创建配置文件：
-```aiignore
+```bash
 cp conf/.env.dist conf/.env
 ```
 
-- 编辑 conf/.env 文件，配置以下关键参数：
+至少需要确认这些配置：
 
 ```bash
-#大模型供应商配置,支持 zhipuai , openai , deepseek 和 ollama
-LLM_PROVIDER=deepseek
-
-#DeepSeek
-DEEPSEEK_API_KEY={YOUR_DEEPSEEK_API_KEY}
-
-#支持review的文件类型(未配置的文件类型不会被审查)
-SUPPORTED_EXTENSIONS=.java,.py,.php,.yml,.vue,.go,.c,.cpp,.h,.js,.css,.md,.sql
-
-#Gitlab配置
-GITLAB_ACCESS_TOKEN={YOUR_GITLAB_ACCESS_TOKEN}
+GITLAB_ACCESS_TOKEN=your_gitlab_token
+CODEREVIEW_CACHE_DIR=~/.cache/codereview
+MERGE_REVIEW_ONLY_PROTECTED_BRANCHES_ENABLED=0
+# CODEX_REVIEW_PROMPT=请用中文输出适合直接回复到 GitLab MR 的审查结论，聚焦 bug、风险、回归和缺失测试。
 ```
 
-**2. 启动服务**
+说明：
 
-```bash
-docker-compose up -d
-```
+- `GITLAB_ACCESS_TOKEN` 优先从 `conf/.env` 读取；未配置时可使用 webhook 的 `Secret Token`
+- `CODEREVIEW_CACHE_DIR` 默认是 `~/.cache/codereview`
+- `CODEX_REVIEW_PROMPT` 可选，用于覆盖默认中文审查提示词
 
-**3. 验证部署**
+## 启动
 
-- 主服务验证：
-  - 访问 http://your-server-ip:5001
-  - 显示 "The code review server is running." 说明服务启动成功。
-- Dashboard 验证：
-  - 访问 http://your-server-ip:5002
-  - 看到一个审查日志页面，说明 Dashboard 启动成功。
-
-### 方案二：本地Python环境部署
-
-**1. 获取源码**
-
-```bash
-git clone https://github.com/sunmh207/AI-Codereview-Gitlab.git
-cd AI-Codereview-Gitlab
-```
-
-**2. 安装依赖**
-
-使用 Python 环境（建议使用虚拟环境 venv）安装项目依赖(Python 版本：3.10+):
+安装依赖：
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**3. 配置环境变量**
-
-同 Docker 部署方案中的.env 文件配置。
-
-**4. 启动服务**
-
-- 启动API服务：
+启动 API：
 
 ```bash
 python api.py
 ```
 
-- 启动Dashboard服务：
+启动 Dashboard：
 
 ```bash
 streamlit run ui.py --server.port=5002 --server.address=0.0.0.0
 ```
 
-### 配置 GitLab Webhook
+## GitLab Webhook
 
-#### 1. 创建Access Token
+在 GitLab 项目设置中配置：
 
-方法一：在 GitLab 个人设置中，创建一个 Personal Access Token。
+- URL: `http://your-server-ip:5001/review/webhook`
+- Trigger Events: 只勾选 `Merge request events`
+- Secret Token: 可选；如果未在 `conf/.env` 中配置 `GITLAB_ACCESS_TOKEN`，可使用这里的 token
 
-方法二：在 GitLab 项目设置中，创建Project Access Token
+## Docker
 
-#### 2. 配置 Webhook
+项目内提供了基础 `Dockerfile` 和 `docker-compose.yml`。镜像已经包含 `git`，但仍要求运行环境里存在可用的 `codex` CLI；如果你用容器部署，需要自行保证容器内能执行 `codex`。
 
-在 GitLab 项目设置中，配置 Webhook：
+## 其他文档
 
-- URL：http://your-server-ip:5001/review/webhook
-- Trigger Events：勾选 Push Events 和 Merge Request Events (不要勾选其它Event)
-- Secret Token：上面配置的 Access Token(可选)
-
-**备注**
-
-1. Token使用优先级
-  - 系统优先使用 .env 文件中的 GITLAB_ACCESS_TOKEN。
-  - 如果 .env 文件中没有配置 GITLAB_ACCESS_TOKEN，则使用 Webhook 传递的Secret Token。
-2. 网络访问要求
-  - 请确保 GitLab 能够访问本系统。
-  - 若内网环境受限，建议将系统部署在外网服务器上。
-
-## 常见问题
-
-**1.如何对整个代码库进行Review?**
-
-可以通过命令行工具对整个代码库进行审查。当前功能仍在不断完善中，欢迎试用并反馈宝贵意见！具体操作如下：
-
-```bash
-python -m biz.cmd.review
-```
-
-运行后，请按照命令行中的提示进行操作即可。
-
-**2.其它常见问题**
-
-参见 [常见问题](doc/faq.md)
-
-## 🏆 Code Review Pro 版
-
-功能更丰富的 AI Code Review 版本
-
-体验站: [https://demo.mzfuture.com](https://demo.mzfuture.com)
-
-项目介绍与使用说明 [Code Review Pro 版](doc/pro.md)
-
-快速启动命令
-```
- curl -fsSL https://raw.githubusercontent.com/sunmh207/AI-Codereview-Gitlab/refs/heads/main/scripts/pro/install.sh | bash
-```
-
-**多种统计图**
-![多种统计图](doc/img/pro/dashboard.png)
-
-**成员提交分析** 
-![成员提交分析](doc/img/pro/member-analysis.png)
-
-**Deep Review** 
-![Deep Review](doc/img/pro/deepreview.png)
-
-**项目哨兵** 
-![项目哨兵](doc/img/pro/project-analysis-plan.png)
-
-## 相关项目
-
-如果你正在使用 AI Agent 开发工具 (如: Cursor、Cloude Code ...)，并希望对人机交互过程进行全面的记录与回溯分析，推荐使用 [Entire Dashboard](https://github.com/sunmh207/entire-dashboard)。该项目提供了完整的人机交互记录与可视化分析功能，可帮助你深入理解 AI Agent 的使用模式，优化交互体验，提升开发效率。
-
-## 交流
-
-若本项目对您有帮助，欢迎 Star ⭐️ 或 Fork。 有任何问题或建议，欢迎提交 Issue 或 PR。
-
-也欢迎加微信/微信群，一起交流学习。
-
-<p float="left">
-  <img src="doc/img/open/wechat.jpg" width="400" />
-  <img src="doc/img/open/wechat_group.jpg" width="400" /> 
-</p>
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=sunmh207/AI-Codereview-Gitlab&type=Timeline)](https://www.star-history.com/#sunmh207/AI-Codereview-Gitlab&Timeline)
+- [FAQ](doc/faq.md)
+- [Pro 版说明](doc/pro.md)

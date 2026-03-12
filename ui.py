@@ -5,7 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 # 设置Streamlit主题 - 必须是第一个st命令
-st.set_page_config(layout="wide", page_title="AI代码审查平台", page_icon="🤖", initial_sidebar_state="expanded")
+st.set_page_config(layout="wide", page_title="GitLab Codex 审查平台", page_icon="🤖", initial_sidebar_state="expanded")
 
 import datetime
 import os
@@ -300,7 +300,7 @@ def login_page():
     with col2:
         st.markdown('<div class="login-container">', unsafe_allow_html=True)
         st.markdown('<div class="platform-icon">🤖</div>', unsafe_allow_html=True)
-        st.markdown('<h1 class="login-title">AI代码审查平台</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 class="login-title">GitLab Codex 审查平台</h1>', unsafe_allow_html=True)
 
         # 如果用户名和密码都为 'admin'，提示用户修改密码
         if DASHBOARD_USER == "admin" and DASHBOARD_PASSWORD == "admin":
@@ -507,13 +507,7 @@ def main_page():
     current_date = datetime.date.today()
     start_date_default = current_date - datetime.timedelta(days=7)
 
-    # 根据环境变量决定是否显示 push_tab
-    show_push_tab = os.environ.get('PUSH_REVIEW_ENABLED', '0') == '1'
-
-    if show_push_tab:
-        mr_tab, push_tab = st.tabs(["合并请求", "代码推送"])
-    else:
-        mr_tab = st.container()
+    mr_tab = st.container()
 
     def display_data(tab, service_func, columns, column_config):
         with tab:
@@ -608,30 +602,6 @@ def main_page():
     }
 
     display_data(mr_tab, ReviewService().get_mr_review_logs, mr_columns, mr_column_config)
-
-    # Push 数据展示
-    if show_push_tab:
-        push_columns = ["project_name", "author", "branch", "updated_at", "commit_messages", "delta", "score",
-                        'additions', 'deletions']
-
-        push_column_config = {
-            "project_name": "项目名称",
-            "author": "开发者",
-            "branch": "分支",
-            "updated_at": "更新时间",
-            "commit_messages": "提交信息",
-            "score": st.column_config.ProgressColumn(
-                "得分",
-                format="%f",
-                min_value=0,
-                max_value=100,
-            ),
-            "additions": None,
-            "deletions": None,
-        }
-
-        display_data(push_tab, ReviewService().get_push_review_logs, push_columns, push_column_config)
-
 
 # 应用入口
 if check_login_status():
