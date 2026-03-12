@@ -9,7 +9,7 @@ from biz.platforms.gitlab.review_trigger import should_review_gitlab_merge_reque
 from biz.platforms.gitlab.webhook_handler import slugify_url
 from biz.queue.worker import handle_merge_request_event
 from biz.utils.log import logger
-from biz.utils.queue import build_merge_request_task_key, handle_queue
+from biz.utils.queue import build_repository_queue_key, handle_queue
 
 webhook_bp = Blueprint('webhook', __name__)
 
@@ -78,14 +78,14 @@ def handle_gitlab_webhook(data):
             {'message': 'Merge request event ignored because it does not carry a reviewable commit update.'}
         ), 200
 
-    task_key = build_merge_request_task_key(data, gitlab_url_slug)
+    queue_key = build_repository_queue_key(data, gitlab_url_slug)
     handle_queue(
         handle_merge_request_event,
         data,
         gitlab_token,
         gitlab_url,
         gitlab_url_slug,
-        task_key=task_key,
+        queue_key=queue_key,
     )
     return jsonify(
         {'message': f'Request received(object_kind={object_kind}), will process asynchronously.'}
