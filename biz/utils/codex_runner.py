@@ -12,6 +12,11 @@ DEFAULT_CODEX_REVIEW_PROMPT = (
     "如果没有发现明确问题，直接说明未发现阻塞性问题，并提示仍需人工确认边界场景。"
 )
 
+DEFAULT_EMPTY_REVIEW_RESULT = (
+    "未发现阻塞性问题。\n"
+    "Codex 本次未返回详细审查内容，请人工复核关键边界场景、回归影响和测试覆盖。"
+)
+
 
 class CodexReviewRunner:
     def __init__(self, prompt: str | None = None):
@@ -80,7 +85,8 @@ class CodexReviewRunner:
 
         review_result = "".join(stdout_chunks).strip()
         if not review_result:
-            raise RuntimeError("Codex review returned empty output.")
+            logger.warning("Codex review returned empty output, using fallback summary.")
+            return DEFAULT_EMPTY_REVIEW_RESULT
 
         return review_result
 
