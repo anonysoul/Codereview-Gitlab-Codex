@@ -11,8 +11,6 @@
 
 - 🚀 多模型支持
   - 兼容 DeepSeek、ZhipuAI、OpenAI、Anthropic、通义千问 和 Ollama，想用哪个就用哪个。
-- 📢 消息即时推送
-  - 审查结果一键直达 钉钉、企业微信 或 飞书，代码问题无处可藏！
 - 📅 自动化日报生成
   - 基于 GitLab & GitHub & Gitea Commit 记录，自动整理每日开发进展，谁在摸鱼、谁在卷，一目了然 😼。
 - 📊 可视化 Dashboard
@@ -67,10 +65,6 @@ DEEPSEEK_API_KEY={YOUR_DEEPSEEK_API_KEY}
 
 #支持review的文件类型(未配置的文件类型不会被审查)
 SUPPORTED_EXTENSIONS=.java,.py,.php,.yml,.vue,.go,.c,.cpp,.h,.js,.css,.md,.sql
-
-#钉钉消息推送: 0不发送钉钉消息,1发送钉钉消息
-DINGTALK_ENABLED=0
-DINGTALK_WEBHOOK_URL={YOUR_WDINGTALK_WEBHOOK_URL}
 
 #Gitlab配置
 GITLAB_ACCESS_TOKEN={YOUR_GITLAB_ACCESS_TOKEN}
@@ -150,20 +144,6 @@ streamlit run ui.py --server.port=5002 --server.address=0.0.0.0
 2. 网络访问要求
   - 请确保 GitLab 能够访问本系统。
   - 若内网环境受限，建议将系统部署在外网服务器上。
-
-### 配置消息推送
-
-#### 1.配置钉钉推送
-
-- 在钉钉群中添加一个自定义机器人，获取 Webhook URL。
-- 更新 .env 中的配置：
-  ```
-  #钉钉配置
-  DINGTALK_ENABLED=1  #0不发送钉钉消息，1发送钉钉消息
-  DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token=xxx #替换为你的Webhook URL
-  ```
-
-企业微信和飞书推送配置类似，具体参见 [常见问题](doc/faq.md)
 
 ## 常见问题
 

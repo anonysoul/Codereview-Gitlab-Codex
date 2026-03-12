@@ -34,42 +34,6 @@ GitLab 默认禁止 Webhooks 访问本地网络地址。
 - 在 Outbound requests 部分，勾选 Allow requests to the local network from webhooks and integrations。
 - 保存。
 
-### 如何让不同项目的消息发送到不同的群？
-
-**解决方案**
-
-在项目的 .env 文件中，配置不同项目的群机器人的 Webhook 地址。
-以 DingTalk 为例，配置如下：
-
-```
-DINGTALK_ENABLED=1
-#项目A的群机器人的Webhook地址
-DINGTALK_WEBHOOK_URL_PROJECT_A=https://oapi.dingtalk.com/robot/send?access_token={access_token_of_project_a}
-#项目B的群机器人的Webhook地址
-DINGTALK_WEBHOOK_URL_PROJECT_B=https://oapi.dingtalk.com/robot/send?access_token={access_token_of_project_b}
-#保留默认WEBHOOK_URL，发送日报或者其它项目将使用此URL
-DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?access_token={access_token}
-```
-
-飞书和企业微信的配置方式类似。
-
-### 如何让不同的Gitlab服务器的消息发送到不同的群？
-
-在项目的 .env 文件中，配置不同Gitlab服务器的群机器人的 Webhook 地址。
-以 DingTalk 为例，配置如下：
-
-```
-DINGTALK_ENABLED=1
-# Gitlab服务器A(http://192.168.30.164)的群机器人的Webhook地址
-DINGTALK_WEBHOOK_192_168_30_164=https://oapi.dingtalk.com/robot/send?access_token={access_token_of_gitlab_server_a}
-# Gitlab服务器B(http://example.gitlab.com)的群机器人的Webhook地址
-DINGTALK_WEBHOOK_example_gitlab_com=https://oapi.dingtalk.com/robot/send?access_token={access_token_of_gitlab_server_b}
-```
-
-飞书和企业微信的配置方式类似。
-
-**优先级：** 优先根据仓库名称匹配webhook地址，其次根据Gitlab服务器地址匹配webhook地址，如果都没有匹配到，则最后使用默认服务器地址
-
 ### docker 容器部署时，连接Ollama失败
 
 **可能原因**
@@ -84,29 +48,6 @@ DINGTALK_WEBHOOK_example_gitlab_com=https://oapi.dingtalk.com/robot/send?access_
 OLLAMA_API_BASE_URL=http://127.0.0.1:11434  # 错误
 OLLAMA_API_BASE_URL=http://{宿主机/外网IP地址}:11434  # 正确
 ```
-
-### 如何配置企业微信和飞书消息推送？
-
-**1.配置企业微信推送**
-
-- 在企业微信群中添加一个自定义机器人，获取 Webhook URL。
-
-- 更新 .env 中的配置：
-  ```
-  #企业微信配置
-  WECOM_ENABLED=1  #0不发送企业微信消息，1发送企业微信消息
-  WECOM_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx  #替换为你的Webhook URL
-  ```
-
-**2.配置飞书推送**
-
-- 在飞书群中添加一个自定义机器人，获取 Webhook URL。
-- 更新 .env 中的配置：
-  ```
-  #飞书配置
-  FEISHU_ENABLED=1
-  FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/xxx #替换为你的Webhook URL
-  ```
 
 ### 是否支持对 GitHub 代码库的 Review？
 
@@ -135,4 +76,3 @@ OLLAMA_API_BASE_URL=http://{宿主机/外网IP地址}:11434  # 正确
   ```
   GITHUB_ACCESS_TOKEN=your-access-token  #替换为你的Access Token
   ```
-

@@ -10,7 +10,6 @@ from biz.platforms.gitea.webhook_handler import filter_changes as filter_gitea_c
     PushHandler as GiteaPushHandler
 from biz.service.review_service import ReviewService
 from biz.utils.code_reviewer import CodeReviewer
-from biz.utils.im import notifier
 from biz.utils.log import logger
 
 
@@ -64,7 +63,6 @@ def handle_push_event(webhook_data: dict, gitlab_token: str, gitlab_url: str, gi
 
     except Exception as e:
         error_message = f'服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        notifier.send_notification(content=error_message)
         logger.error('出现未知错误: %s', error_message)
 
 
@@ -88,8 +86,7 @@ def handle_merge_request_event(webhook_data: dict, gitlab_token: str, gitlab_url
         is_draft = object_attributes.get('draft') or object_attributes.get('work_in_progress')
         if is_draft:
             msg = f"[通知] MR为草稿（draft），未触发AI审查。\n项目: {webhook_data['project']['name']}\n作者: {webhook_data['user']['username']}\n源分支: {object_attributes.get('source_branch')}\n目标分支: {object_attributes.get('target_branch')}\n链接: {object_attributes.get('url')}"
-            notifier.send_notification(content=msg)
-            logger.info("MR为draft，仅发送通知，不触发AI review。")
+            logger.info("%s", msg)
             return
 
         # 如果开启了仅review projected branches的，判断当前目标分支是否为projected branches
@@ -162,7 +159,6 @@ def handle_merge_request_event(webhook_data: dict, gitlab_token: str, gitlab_url
 
     except Exception as e:
         error_message = f'AI Code Review 服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        notifier.send_notification(content=error_message)
         logger.error('出现未知错误: %s', error_message)
 
 def handle_github_push_event(webhook_data: dict, github_token: str, github_url: str, github_url_slug: str):
@@ -214,7 +210,6 @@ def handle_github_push_event(webhook_data: dict, github_token: str, github_url: 
 
     except Exception as e:
         error_message = f'服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        notifier.send_notification(content=error_message)
         logger.error('出现未知错误: %s', error_message)
 
 
@@ -301,7 +296,6 @@ def handle_github_pull_request_event(webhook_data: dict, github_token: str, gith
 
     except Exception as e:
         error_message = f'服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        notifier.send_notification(content=error_message)
         logger.error('出现未知错误: %s', error_message)
 
 
@@ -355,7 +349,6 @@ def handle_gitea_push_event(webhook_data: dict, gitea_token: str, gitea_url: str
 
     except Exception as e:
         error_message = f'服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        notifier.send_notification(content=error_message)
         logger.error('出现未知错误: %s', error_message)
 
 
@@ -434,5 +427,4 @@ def handle_gitea_pull_request_event(webhook_data: dict, gitea_token: str, gitea_
 
     except Exception as e:
         error_message = f'AI Code Review 服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        notifier.send_notification(content=error_message)
         logger.error('出现未知错误: %s', error_message)
