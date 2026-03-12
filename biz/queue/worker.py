@@ -82,13 +82,12 @@ def handle_merge_request_event(
             repo_preparation.last_commit_id,
         )
 
-        diff_stats = repo_cache_manager.collect_supported_diff_stats(
+        diff_stats = repo_cache_manager.collect_diff_stats(
             repo_preparation.local_path,
             repo_preparation.target_branch,
         )
         if not diff_stats.changed_files:
-            logger.info('未检测到有关代码的修改, 修改文件可能不满足 SUPPORTED_EXTENSIONS。')
-            return
+            logger.info('未检测到文件变更，继续交由 Codex 自行审查。')
 
         commits = handler.get_merge_request_commits()
         if not commits:

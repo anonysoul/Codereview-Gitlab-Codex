@@ -1,4 +1,3 @@
-import os
 import re
 import time
 from urllib.parse import urljoin
@@ -6,29 +5,6 @@ import fnmatch
 import requests
 
 from biz.utils.log import logger
-
-
-def filter_changes(changes: list):
-    '''
-    过滤数据，只保留支持的文件类型以及必要的字段信息
-    '''
-    # 从环境变量中获取支持的文件扩展名
-    supported_extensions = os.getenv('SUPPORTED_EXTENSIONS', '.java,.py,.php').split(',')
-
-    filter_deleted_files_changes = [change for change in changes if not change.get("deleted_file")]
-
-    # 过滤 `new_path` 以支持的扩展名结尾的元素, 仅保留diff和new_path字段
-    filtered_changes = [
-        {
-            'diff': item.get('diff', ''),
-            'new_path': item['new_path'],
-            'additions': len(re.findall(r'^\+(?!\+\+)', item.get('diff', ''), re.MULTILINE)),
-            'deletions': len(re.findall(r'^-(?!--)', item.get('diff', ''), re.MULTILINE))
-        }
-        for item in filter_deleted_files_changes
-        if any(item.get('new_path', '').endswith(ext) for ext in supported_extensions)
-    ]
-    return filtered_changes
 
 
 def slugify_url(original_url: str) -> str:

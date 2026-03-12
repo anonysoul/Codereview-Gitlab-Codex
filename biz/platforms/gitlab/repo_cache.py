@@ -79,9 +79,9 @@ class GitLabRepoCacheManager:
             base_ref=self.build_base_ref(target_branch),
         )
 
-    def collect_supported_diff_stats(self, repo_path: str, target_branch: str) -> RepoDiffStats:
+    def collect_diff_stats(self, repo_path: str, target_branch: str) -> RepoDiffStats:
         base_ref = self.build_base_ref(target_branch)
-        changed_files = self._list_supported_files(repo_path, base_ref)
+        changed_files = self._list_changed_files(repo_path, base_ref)
         additions, deletions = self._collect_numstat(repo_path, base_ref, changed_files)
         return RepoDiffStats(
             additions=additions,
@@ -183,18 +183,13 @@ class GitLabRepoCacheManager:
         self._run_git(["checkout", "--force", last_commit_id], cwd=repo_dir)
         self._run_git(["clean", "-fd"], cwd=repo_dir)
 
-    def _list_supported_files(self, repo_path: str, base_ref: str) -> list[str]:
+    def _list_changed_files(self, repo_path: str, base_ref: str) -> list[str]:
         result = self._run_git(
             ["diff", "--name-only", "--diff-filter=ACMR", f"{base_ref}...HEAD"],
             cwd=Path(repo_path),
         )
-        supported_extensions = os.getenv("SUPPORTED_EXTENSIONS", ".java,.py,.php").split(",")
         files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        return [
-            file_path
-            for file_path in files
-            if any(file_path.endswith(ext) for ext in supported_extensions)
-        ]
+        return files
 
     def _collect_numstat(self, repo_path: str, base_ref: str, changed_files: list[str]) -> tuple[int, int]:
         if not changed_files:

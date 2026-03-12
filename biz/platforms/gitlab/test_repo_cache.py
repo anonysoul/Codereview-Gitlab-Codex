@@ -142,7 +142,7 @@ class TestGitLabRepoCacheManager(TestCase):
                 second_commit_id,
             )
 
-    def test_collect_supported_diff_stats_ignores_unsupported_files(self):
+    def test_collect_diff_stats_includes_all_changed_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             remote_repo = tmp_path / "remote.git"
@@ -183,19 +183,12 @@ class TestGitLabRepoCacheManager(TestCase):
                 },
             }
 
-            with patch.dict(
-                os.environ,
-                {
-                    "CODEREVIEW_CACHE_DIR": str(cache_dir),
-                    "SUPPORTED_EXTENSIONS": ".py,.js",
-                },
-                clear=False,
-            ):
+            with patch.dict(os.environ, {"CODEREVIEW_CACHE_DIR": str(cache_dir)}, clear=False):
                 prepared = manager.prepare_merge_request_repo(webhook_data)
-                diff_stats = manager.collect_supported_diff_stats(prepared.local_path, "main")
+                diff_stats = manager.collect_diff_stats(prepared.local_path, "main")
 
-            self.assertEqual(diff_stats.changed_files, ["code.py"])
-            self.assertEqual(diff_stats.additions, 1)
+            self.assertEqual(diff_stats.changed_files, ["code.py", "notes.txt"])
+            self.assertEqual(diff_stats.additions, 2)
             self.assertEqual(diff_stats.deletions, 0)
 
     @patch("biz.platforms.gitlab.repo_cache.requests.get")

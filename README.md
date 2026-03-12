@@ -2,7 +2,7 @@
 
 仅支持 GitLab Merge Request 的自动审查服务。
 
-主链路是：GitLab `merge_request` webhook -> 拉取或复用本地仓库缓存 -> checkout 到 webhook 的 `last_commit.id` -> 执行 `codex review --base origin/<target_branch>` -> 将结果作为单条 MR note 回帖 -> 写入审查日志。
+主链路是：GitLab `merge_request` webhook -> 拉取或复用本地仓库缓存 -> checkout 到 webhook 的 `last_commit.id` -> 执行 `codex review --base origin/<target_branch>` -> 将结果作为单条 MR note 回帖 -> 写入审查日志。MR 的 `open`、`reopen`、`update` 事件都会触发审查；PR 分支 push 后产生的 MR update 也会继续审查。
 
 ## 当前范围
 
