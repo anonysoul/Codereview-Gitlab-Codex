@@ -4,6 +4,7 @@ from datetime import datetime
 
 from biz.entity.review_entity import MergeRequestReviewEntity, PushReviewEntity
 from biz.event.event_manager import event_manager
+from biz.platforms.gitlab.review_trigger import should_review_gitlab_merge_request
 from biz.platforms.gitlab.webhook_handler import filter_changes, MergeRequestHandler, PushHandler
 from biz.platforms.github.webhook_handler import filter_changes as filter_github_changes, PullRequestHandler as GithubPullRequestHandler, PushHandler as GithubPushHandler
 from biz.platforms.gitea.webhook_handler import filter_changes as filter_gitea_changes, PullRequestHandler as GiteaPullRequestHandler, \
@@ -11,7 +12,6 @@ from biz.platforms.gitea.webhook_handler import filter_changes as filter_gitea_c
 from biz.service.review_service import ReviewService
 from biz.utils.code_reviewer import CodeReviewer
 from biz.utils.log import logger
-
 
 
 def handle_push_event(webhook_data: dict, gitlab_token: str, gitlab_url: str, gitlab_url_slug: str):
@@ -94,8 +94,13 @@ def handle_merge_request_event(webhook_data: dict, gitlab_token: str, gitlab_url
             logger.info("Merge Request target branch not match protected branches, ignored.")
             return
 
-        if handler.action not in ['open', 'update']:
-            logger.info(f"Merge Request Hook event, action={handler.action}, ignored.")
+        if not should_review_gitlab_merge_request(object_attributes, handler.action):
+            logger.info(
+                "Merge Request Hook event ignored: action=%s, oldrev=%s, last_commit_id=%s.",
+                handler.action,
+                object_attributes.get('oldrev', ''),
+                object_attributes.get('last_commit', {}).get('id', '')
+            )
             return
 
         # 检查last_commit_id是否已经存在，如果存在则跳过处理
