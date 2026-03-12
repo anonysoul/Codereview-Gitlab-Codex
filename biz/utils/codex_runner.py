@@ -83,7 +83,7 @@ class CodexReviewRunner:
                 f"Codex review failed with exit code {return_code}: {error_output}"
             )
 
-        review_result = "".join(stdout_chunks).strip()
+        review_result = self._extract_review_result(stdout_chunks, stderr_chunks)
         if not review_result:
             logger.warning("Codex review returned empty output, using fallback summary.")
             return DEFAULT_EMPTY_REVIEW_RESULT
@@ -97,3 +97,22 @@ class CodexReviewRunner:
             "the argument '--base <BRANCH>' cannot be used with '[PROMPT]'" in message
             or "cannot be used with '[PROMPT]'" in message
         )
+
+    @staticmethod
+    def _extract_review_result(stdout_chunks: list[str], stderr_chunks: list[str]) -> str:
+        stdout_text = "".join(stdout_chunks).strip()
+        if stdout_text:
+            return stdout_text
+
+        stderr_text = "".join(stderr_chunks).strip()
+        if not stderr_text:
+            return ""
+
+        marker = "Review comment:"
+        marker_index = stderr_text.find(marker)
+        if marker_index >= 0:
+            comment = stderr_text[marker_index + len(marker):].strip()
+            if comment:
+                return comment
+
+        return stderr_text

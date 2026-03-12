@@ -55,6 +55,26 @@ class TestCodexReviewRunner(TestCase):
 
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
     @patch("biz.utils.codex_runner.subprocess.Popen")
+    def test_review_uses_review_comment_from_stderr_when_stdout_is_empty(self, mock_popen, _mock_which):
+        process = MagicMock()
+        process.stdout = StringIO("")
+        process.stderr = StringIO(
+            "Review comment:\n"
+            "- [P1] Fix migration\n"
+            "  This migration fails.\n"
+        )
+        process.wait.return_value = 0
+        mock_popen.return_value = process
+
+        result = CodexReviewRunner().review("/tmp/repo", "origin/main")
+
+        self.assertEqual(
+            result,
+            "- [P1] Fix migration\n  This migration fails."
+        )
+
+    @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
+    @patch("biz.utils.codex_runner.subprocess.Popen")
     def test_review_uses_env_prompt_when_present(self, mock_popen, _mock_which):
         process = MagicMock()
         process.stdout = StringIO("ok")
