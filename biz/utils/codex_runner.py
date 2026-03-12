@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import threading
 
 from biz.utils.log import logger
 
@@ -16,6 +17,20 @@ class CodexReviewRunner:
     def __init__(self, prompt: str | None = None):
         self.prompt = prompt or os.getenv("CODEX_REVIEW_PROMPT", DEFAULT_CODEX_REVIEW_PROMPT)
 
+    @staticmethod
+    def _stream_pipe(pipe, chunks: list[str], log_method) -> None:
+        if pipe is None:
+            return
+
+        try:
+            for line in iter(pipe.readline, ""):
+                chunks.append(line)
+                message = line.rstrip()
+                if message:
+                    log_method("codex review: %s", message)
+        finally:
+            pipe.close()
+
     def review(self, repo_path: str, base_ref: str) -> str:
         codex_path = shutil.which("codex")
         if not codex_path:
@@ -23,20 +38,35 @@ class CodexReviewRunner:
 
         command = [codex_path, "review", "--base", base_ref, self.prompt]
         logger.info("Running Codex review in %s against %s", repo_path, base_ref)
-        result = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=repo_path,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
+            bufsize=1,
         )
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
 
-        if result.returncode != 0:
+        stderr_thread = threading.Thread(
+            target=self._stream_pipe,
+            args=(process.stderr, stderr_chunks, logger.warning),
+            daemon=True,
+        )
+        stderr_thread.start()
+
+        self._stream_pipe(process.stdout, stdout_chunks, logger.info)
+        return_code = process.wait()
+        stderr_thread.join()
+
+        if return_code != 0:
+            error_output = "".join(stderr_chunks).strip() or "".join(stdout_chunks).strip()
             raise RuntimeError(
-                f"Codex review failed with exit code {result.returncode}: {result.stderr.strip()}"
+                f"Codex review failed with exit code {return_code}: {error_output}"
             )
 
-        review_result = result.stdout.strip()
+        review_result = "".join(stdout_chunks).strip()
         if not review_result:
             raise RuntimeError("Codex review returned empty output.")
 
