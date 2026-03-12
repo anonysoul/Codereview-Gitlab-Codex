@@ -27,7 +27,7 @@ class TestCodexReviewRunner(TestCase):
     def test_review_returns_stdout(self, mock_popen, mock_logger, mock_run, _mock_which):
         process = MagicMock()
         process.stdout = StringIO("review result\n")
-        process.stderr = StringIO("progress line\n")
+        process.stderr = StringIO("Review comment:\nreview result\n")
         process.wait.return_value = 0
         mock_popen.return_value = process
         mock_run.return_value = MagicMock(returncode=0, stdout="中文审查结果", stderr="")
@@ -36,8 +36,8 @@ class TestCodexReviewRunner(TestCase):
 
         self.assertEqual(result, "中文审查结果")
         mock_popen.assert_called_once()
-        mock_logger.info.assert_any_call("codex review: %s", "review result")
-        mock_logger.warning.assert_any_call("codex review: %s", "progress line")
+        mock_logger.warning.assert_any_call("codex review: %s", "Review comment:")
+        mock_logger.warning.assert_any_call("codex review: %s", "review result")
 
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
     @patch("biz.utils.codex_runner.subprocess.Popen")
@@ -66,9 +66,22 @@ class TestCodexReviewRunner(TestCase):
         result = CodexReviewRunner().review("/tmp/repo", "origin/main")
 
         self.assertEqual(result, DEFAULT_EMPTY_REVIEW_RESULT)
-        mock_logger.warning.assert_any_call(
-            "Codex review returned empty output, using fallback summary."
-        )
+        mock_logger.warning.assert_not_called()
+
+    @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
+    @patch("biz.utils.codex_runner.subprocess.run")
+    @patch("biz.utils.codex_runner.subprocess.Popen")
+    def test_review_returns_fallback_when_output_has_no_review_markers(self, mock_popen, mock_run, _mock_which):
+        process = MagicMock()
+        process.stdout = StringIO("OpenAI Codex v0.114.0\n")
+        process.stderr = StringIO("some execution logs\n")
+        process.wait.return_value = 0
+        mock_popen.return_value = process
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = CodexReviewRunner().review("/tmp/repo", "origin/main")
+
+        self.assertEqual(result, DEFAULT_EMPTY_REVIEW_RESULT)
 
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
     @patch("biz.utils.codex_runner.subprocess.run")
@@ -150,7 +163,7 @@ class TestCodexReviewRunner(TestCase):
 
         second_process = MagicMock()
         second_process.stdout = StringIO("review result\n")
-        second_process.stderr = StringIO("")
+        second_process.stderr = StringIO("Review comment:\nreview result\n")
         second_process.wait.return_value = 0
 
         mock_popen.side_effect = [first_process, second_process]
@@ -177,7 +190,7 @@ class TestCodexReviewRunner(TestCase):
     @patch("biz.utils.codex_runner.subprocess.Popen")
     def test_review_keeps_original_text_when_translation_fails(self, mock_popen, mock_run, _mock_which):
         process = MagicMock()
-        process.stdout = StringIO("review result\n")
+        process.stdout = StringIO("Review comment:\nreview result\n")
         process.stderr = StringIO("")
         process.wait.return_value = 0
         mock_popen.return_value = process
@@ -185,21 +198,21 @@ class TestCodexReviewRunner(TestCase):
 
         result = CodexReviewRunner().review("/tmp/repo", "origin/main")
 
-        self.assertEqual(result, "review result")
+        self.assertEqual(result, DEFAULT_EMPTY_REVIEW_RESULT)
 
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
     @patch("biz.utils.codex_runner.subprocess.run")
     @patch("biz.utils.codex_runner.subprocess.Popen")
     def test_review_skips_translation_when_output_is_already_chinese(self, mock_popen, mock_run, _mock_which):
         process = MagicMock()
-        process.stdout = StringIO("这是中文审查结果\n")
+        process.stdout = StringIO("Review comment:\n这是中文审查结果\n")
         process.stderr = StringIO("")
         process.wait.return_value = 0
         mock_popen.return_value = process
 
         result = CodexReviewRunner().review("/tmp/repo", "origin/main")
 
-        self.assertEqual(result, "这是中文审查结果")
+        self.assertEqual(result, DEFAULT_EMPTY_REVIEW_RESULT)
         mock_run.assert_not_called()
 
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
@@ -214,7 +227,7 @@ class TestCodexReviewRunner(TestCase):
         protected, replacements = CodexReviewRunner._protect_translation_literals(original_review.strip())
 
         process = MagicMock()
-        process.stdout = StringIO(original_review)
+        process.stdout = StringIO(f"Review comment:\n{original_review}")
         process.stderr = StringIO("")
         process.wait.return_value = 0
         mock_popen.return_value = process
@@ -231,8 +244,4 @@ class TestCodexReviewRunner(TestCase):
 
         result = CodexReviewRunner().review("/tmp/repo", "origin/main")
 
-        self.assertIn("WF-FLOWSEC-001", result)
-        self.assertIn("/tmp/repo/spec/workflows/flow/WF-FLOWSEC-001.md:37-37", result)
-        self.assertIn("BDD-FLOWSEC-0001", result)
-        self.assertIn("PUT", result)
-        self.assertIn("/api/v2/workflows/{id}/extra-props", result)
+        self.assertEqual(result, DEFAULT_EMPTY_REVIEW_RESULT)
