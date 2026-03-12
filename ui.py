@@ -481,7 +481,7 @@ def logout():
 
 
 # Pro 版文档链接（登录后展示）
-PRO_VERSION_URL = "https://github.com/sunmh207/AI-Codereview-Gitlab/blob/main/doc/pro.md"
+PRO_VERSION_URL = "doc/pro.md"
 
 
 # 主要内容

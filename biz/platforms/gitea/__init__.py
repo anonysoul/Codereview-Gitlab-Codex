@@ -1,4 +1,0 @@
-"""
-Gitea integration handlers.
-"""
-
