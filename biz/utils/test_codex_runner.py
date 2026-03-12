@@ -62,3 +62,42 @@ class TestCodexReviewRunner(TestCase):
 
         command = mock_popen.call_args.args[0]
         self.assertEqual(command[-1], "env prompt")
+
+    @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
+    @patch("biz.utils.codex_runner.logger")
+    @patch("biz.utils.codex_runner.subprocess.Popen")
+    def test_review_retries_without_prompt_when_codex_cli_rejects_prompt(
+        self,
+        mock_popen,
+        mock_logger,
+        _mock_which,
+    ):
+        first_process = MagicMock()
+        first_process.stdout = StringIO("")
+        first_process.stderr = StringIO(
+            "error: the argument '--base <BRANCH>' cannot be used with '[PROMPT]'\n"
+        )
+        first_process.wait.return_value = 2
+
+        second_process = MagicMock()
+        second_process.stdout = StringIO("review result\n")
+        second_process.stderr = StringIO("")
+        second_process.wait.return_value = 0
+
+        mock_popen.side_effect = [first_process, second_process]
+
+        result = CodexReviewRunner(prompt="custom prompt").review("/tmp/repo", "origin/main")
+
+        self.assertEqual(result, "review result")
+        self.assertEqual(mock_popen.call_count, 2)
+        self.assertEqual(
+            mock_popen.call_args_list[0].args[0],
+            ["/usr/bin/codex", "review", "--base", "origin/main", "custom prompt"],
+        )
+        self.assertEqual(
+            mock_popen.call_args_list[1].args[0],
+            ["/usr/bin/codex", "review", "--base", "origin/main"],
+        )
+        mock_logger.warning.assert_any_call(
+            "Codex CLI rejected review prompt with --base, retrying without custom prompt."
+        )

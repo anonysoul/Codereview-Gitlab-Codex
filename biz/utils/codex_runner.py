@@ -37,6 +37,18 @@ class CodexReviewRunner:
             raise RuntimeError("`codex` executable not found in PATH.")
 
         command = [codex_path, "review", "--base", base_ref, self.prompt]
+        try:
+            return self._run_review_command(command, repo_path, base_ref)
+        except RuntimeError as exc:
+            if self._should_retry_without_prompt(exc):
+                retry_command = [codex_path, "review", "--base", base_ref]
+                logger.warning(
+                    "Codex CLI rejected review prompt with --base, retrying without custom prompt."
+                )
+                return self._run_review_command(retry_command, repo_path, base_ref)
+            raise
+
+    def _run_review_command(self, command: list[str], repo_path: str, base_ref: str) -> str:
         logger.info("Running Codex review in %s against %s", repo_path, base_ref)
         process = subprocess.Popen(
             command,
@@ -71,3 +83,11 @@ class CodexReviewRunner:
             raise RuntimeError("Codex review returned empty output.")
 
         return review_result
+
+    @staticmethod
+    def _should_retry_without_prompt(exc: RuntimeError) -> bool:
+        message = str(exc)
+        return (
+            "the argument '--base <BRANCH>' cannot be used with '[PROMPT]'" in message
+            or "cannot be used with '[PROMPT]'" in message
+        )
