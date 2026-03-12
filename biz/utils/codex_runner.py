@@ -14,8 +14,7 @@ DEFAULT_CODEX_REVIEW_PROMPT = (
 )
 
 DEFAULT_EMPTY_REVIEW_RESULT = (
-    "未发现阻塞性问题。\n"
-    "Codex 本次未返回详细审查内容，请人工复核关键边界场景、回归影响和测试覆盖。"
+    "未发现问题，请人工复核关键边界场景、回归影响和测试覆盖。"
 )
 
 DEFAULT_TRANSLATION_PROMPT_TEMPLATE = (
