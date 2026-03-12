@@ -19,7 +19,10 @@ DEFAULT_EMPTY_REVIEW_RESULT = (
 
 DEFAULT_TRANSLATION_PROMPT_TEMPLATE = (
     "请将下面的 GitLab Merge Request 审查意见翻译成简洁、专业、自然的中文，"
-    "保留问题级别、文件路径、项目符号和代码标识，不要补充原文没有的新结论。\n\n"
+    "只翻译自然语言说明。"
+    "不要翻译或改写问题级别、文件路径、URL 路径、HTTP 方法、占位符、变量名、用例编号、"
+    "Markdown/YAML 文件名、项目符号和代码标识。"
+    "不要补充原文没有的新结论，也不要遗漏任何一条问题。\n\n"
     "{review_text}"
 )
 
@@ -145,7 +148,8 @@ class CodexReviewRunner:
         return translated or review_result
 
     def _translate_review_result(self, codex_path: str, repo_path: str, review_result: str) -> str:
-        prompt = DEFAULT_TRANSLATION_PROMPT_TEMPLATE.format(review_text=review_result)
+        protected_review_text, replacements = self._protect_translation_literals(review_result)
+        prompt = DEFAULT_TRANSLATION_PROMPT_TEMPLATE.format(review_text=protected_review_text)
         command = [codex_path, "exec", "-"]
         logger.info("Translating Codex review output to Chinese in %s", repo_path)
         result = subprocess.run(
@@ -167,8 +171,47 @@ class CodexReviewRunner:
         if not translated:
             logger.warning("Codex translation returned empty output, keeping original review result.")
             return ""
-        return translated
+        return self._restore_translation_literals(translated, replacements)
 
     @staticmethod
     def _contains_cjk(text: str) -> bool:
         return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+    @staticmethod
+    def _protect_translation_literals(text: str) -> tuple[str, dict[str, str]]:
+        replacements: dict[str, str] = {}
+        patterns = (
+            r"`[^`\n]+`",
+            r"/(?:[^\s:]+/)*[^\s:]+\.[A-Za-z0-9_-]+",
+            r"/(?:[A-Za-z0-9._{}-]+/)*[A-Za-z0-9._{}-]+",
+            r"\b[A-Z]+(?:-[A-Z0-9]+)+\b",
+            r"\b(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b",
+            r"\b[A-Z][A-Z0-9_]{2,}\b",
+        )
+
+        protected = text
+        for pattern in patterns:
+            protected = re.sub(
+                pattern,
+                lambda match: CodexReviewRunner._replace_literal(match, replacements),
+                protected,
+            )
+        return protected, replacements
+
+    @staticmethod
+    def _replace_literal(match: re.Match[str], replacements: dict[str, str]) -> str:
+        literal = match.group(0)
+        for token, original in replacements.items():
+            if original == literal:
+                return token
+
+        token = f"[[codex_literal_{len(replacements)}]]"
+        replacements[token] = literal
+        return token
+
+    @staticmethod
+    def _restore_translation_literals(text: str, replacements: dict[str, str]) -> str:
+        restored = text
+        for token, original in replacements.items():
+            restored = restored.replace(token, original)
+        return restored

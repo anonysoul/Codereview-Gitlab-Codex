@@ -7,6 +7,19 @@ from biz.utils.codex_runner import CodexReviewRunner, DEFAULT_EMPTY_REVIEW_RESUL
 
 
 class TestCodexReviewRunner(TestCase):
+    def test_protect_translation_literals_preserves_structured_tokens(self):
+        review_text = (
+            "[P1] Correct the step name — /tmp/repo/bdd/features/flow/BDD-FLOWSEC-0004.yml:40-40 "
+            "The new case interpolates WORKFLOW_ID from `创建外部提交审批单并上传附件`, "
+            "and uses PUT /api/v2/workflows/{id}/extra-props."
+        )
+
+        protected, replacements = CodexReviewRunner._protect_translation_literals(review_text)
+        restored = CodexReviewRunner._restore_translation_literals(protected, replacements)
+
+        self.assertIn("[[codex_literal_", protected)
+        self.assertEqual(restored, review_text)
+
     @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
     @patch("biz.utils.codex_runner.subprocess.run")
     @patch("biz.utils.codex_runner.logger")
@@ -188,3 +201,38 @@ class TestCodexReviewRunner(TestCase):
 
         self.assertEqual(result, "这是中文审查结果")
         mock_run.assert_not_called()
+
+    @patch("biz.utils.codex_runner.shutil.which", return_value="/usr/bin/codex")
+    @patch("biz.utils.codex_runner.subprocess.run")
+    @patch("biz.utils.codex_runner.subprocess.Popen")
+    def test_review_restores_protected_literals_after_translation(self, mock_popen, mock_run, _mock_which):
+        original_review = (
+            "[P2] Update WF-FLOWSEC-001 to match the new extra-props verb — "
+            "/tmp/repo/spec/workflows/flow/WF-FLOWSEC-001.md:37-37 "
+            "BDD-FLOWSEC-0001 now exercises PUT /api/v2/workflows/{id}/extra-props.\n"
+        )
+        protected, replacements = CodexReviewRunner._protect_translation_literals(original_review.strip())
+
+        process = MagicMock()
+        process.stdout = StringIO(original_review)
+        process.stderr = StringIO("")
+        process.wait.return_value = 0
+        mock_popen.return_value = process
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                protected
+                .replace("Update ", "更新")
+                .replace(" to match the new extra-props verb", " 以匹配新的 extra-props 动词")
+                .replace(" now exercises ", " 现在使用 ")
+            ),
+            stderr="",
+        )
+
+        result = CodexReviewRunner().review("/tmp/repo", "origin/main")
+
+        self.assertIn("WF-FLOWSEC-001", result)
+        self.assertIn("/tmp/repo/spec/workflows/flow/WF-FLOWSEC-001.md:37-37", result)
+        self.assertIn("BDD-FLOWSEC-0001", result)
+        self.assertIn("PUT", result)
+        self.assertIn("/api/v2/workflows/{id}/extra-props", result)
