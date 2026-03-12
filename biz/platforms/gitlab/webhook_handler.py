@@ -1,6 +1,6 @@
 import re
 import time
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 import fnmatch
 import requests
 
@@ -25,6 +25,28 @@ def slugify_url(original_url: str) -> str:
     return target
 
 
+def extract_gitlab_project_ref(webhook_data: dict) -> str | None:
+    project = webhook_data.get('project', {})
+    object_attributes = webhook_data.get('object_attributes', {})
+
+    project_path = (
+        project.get('path_with_namespace')
+        or object_attributes.get('target', {}).get('path_with_namespace')
+        or object_attributes.get('source', {}).get('path_with_namespace')
+    )
+    if project_path:
+        return quote(str(project_path).strip('/'), safe='')
+
+    project_id = (
+        project.get('id')
+        or object_attributes.get('target_project_id')
+        or object_attributes.get('source_project_id')
+    )
+    if project_id is None:
+        return None
+    return quote(str(project_id), safe='')
+
+
 class MergeRequestHandler:
     def __init__(self, webhook_data: dict, gitlab_token: str, gitlab_url: str):
         self.merge_request_iid = None
@@ -32,7 +54,7 @@ class MergeRequestHandler:
         self.gitlab_token = gitlab_token
         self.gitlab_url = gitlab_url
         self.event_type = None
-        self.project_id = None
+        self.project_ref = None
         self.action = None
         self.parse_event_type()
 
@@ -46,7 +68,7 @@ class MergeRequestHandler:
         # 提取 Merge Request 的相关参数
         merge_request = self.webhook_data.get('object_attributes', {})
         self.merge_request_iid = merge_request.get('iid')
-        self.project_id = merge_request.get('target_project_id')
+        self.project_ref = extract_gitlab_project_ref(self.webhook_data)
         self.action = merge_request.get('action')
 
     def get_merge_request_changes(self) -> list:
@@ -61,7 +83,7 @@ class MergeRequestHandler:
         for attempt in range(max_retries):
             # 调用 GitLab API 获取 Merge Request 的 changes
             url = urljoin(f"{self.gitlab_url}/",
-                          f"api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/changes?access_raw_diffs=true")
+                          f"api/v4/projects/{self.project_ref}/merge_requests/{self.merge_request_iid}/changes?access_raw_diffs=true")
             headers = {
                 'Private-Token': self.gitlab_token
             }
@@ -92,7 +114,7 @@ class MergeRequestHandler:
 
         # 调用 GitLab API 获取 Merge Request 的 commits
         url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/commits")
+                      f"api/v4/projects/{self.project_ref}/merge_requests/{self.merge_request_iid}/commits")
         headers = {
             'Private-Token': self.gitlab_token
         }
@@ -107,7 +129,7 @@ class MergeRequestHandler:
 
     def add_merge_request_notes(self, review_result):
         url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_id}/merge_requests/{self.merge_request_iid}/notes")
+                      f"api/v4/projects/{self.project_ref}/merge_requests/{self.merge_request_iid}/notes")
         headers = {
             'Private-Token': self.gitlab_token,
             'Content-Type': 'application/json'
@@ -125,7 +147,7 @@ class MergeRequestHandler:
 
     def target_branch_protected(self) -> bool:
         url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_id}/protected_branches")
+                      f"api/v4/projects/{self.project_ref}/protected_branches")
         headers = {
             'Private-Token': self.gitlab_token,
             'Content-Type': 'application/json'
@@ -148,7 +170,7 @@ class PushHandler:
         self.gitlab_token = gitlab_token
         self.gitlab_url = gitlab_url
         self.event_type = None
-        self.project_id = None
+        self.project_ref = None
         self.branch_name = None
         self.commit_list = []
         self.parse_event_type()
@@ -161,9 +183,7 @@ class PushHandler:
 
     def parse_push_event(self):
         # 提取 Push 事件的相关参数
-        self.project_id = self.webhook_data.get('project_id', None)
-        if self.project_id is None:
-            self.project_id = self.webhook_data.get('project', {}).get('id')
+        self.project_ref = extract_gitlab_project_ref(self.webhook_data)
         self.branch_name = self.webhook_data.get('ref', '').replace('refs/heads/', '')
         self.commit_list = self.webhook_data.get('commits', [])
 
@@ -200,7 +220,7 @@ class PushHandler:
             return
 
         url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_id}/repository/commits/{last_commit_id}/comments")
+                      f"api/v4/projects/{self.project_ref}/repository/commits/{last_commit_id}/comments")
         headers = {
             'Private-Token': self.gitlab_token,
             'Content-Type': 'application/json'
@@ -219,7 +239,7 @@ class PushHandler:
     def __repository_commits(self, ref_name: str = "", since: str = "", until: str = "", pre_page: int = 100,
                              page: int = 1):
         # 获取仓库提交信息
-        url = f"{urljoin(f'{self.gitlab_url}/', f'api/v4/projects/{self.project_id}/repository/commits')}?ref_name={ref_name}&since={since}&until={until}&per_page={pre_page}&page={page}"
+        url = f"{urljoin(f'{self.gitlab_url}/', f'api/v4/projects/{self.project_ref}/repository/commits')}?ref_name={ref_name}&since={since}&until={until}&per_page={pre_page}&page={page}"
         headers = {
             'Private-Token': self.gitlab_token
         }
@@ -236,7 +256,7 @@ class PushHandler:
 
     def repository_compare(self, before: str, after: str):
         # 比较两个提交之间的差异
-        url = f"{urljoin(f'{self.gitlab_url}/', f'api/v4/projects/{self.project_id}/repository/compare')}?from={before}&to={after}"
+        url = f"{urljoin(f'{self.gitlab_url}/', f'api/v4/projects/{self.project_ref}/repository/compare')}?from={before}&to={after}"
         headers = {
             'Private-Token': self.gitlab_token
         }
@@ -253,7 +273,7 @@ class PushHandler:
 
     def get_commit_diff(self, commit_sha: str):
         """获取单个提交的差异信息"""
-        url = f"{urljoin(f'{self.gitlab_url}/', f'api/v4/projects/{self.project_id}/repository/commits/{commit_sha}/diff')}"
+        url = f"{urljoin(f'{self.gitlab_url}/', f'api/v4/projects/{self.project_ref}/repository/commits/{commit_sha}/diff')}"
         headers = {
             'Private-Token': self.gitlab_token
         }
