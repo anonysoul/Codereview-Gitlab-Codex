@@ -12,6 +12,13 @@ from biz.utils.codex_runner import CodexReviewRunner
 from biz.utils.log import logger
 
 
+def _fallback_commits_from_webhook(object_attributes: dict) -> list[dict]:
+    last_commit = object_attributes.get('last_commit') or {}
+    if not last_commit.get('id'):
+        return []
+    return [last_commit]
+
+
 def handle_merge_request_event(
     webhook_data: dict,
     gitlab_token: str,
@@ -91,8 +98,12 @@ def handle_merge_request_event(
 
         commits = handler.get_merge_request_commits()
         if not commits:
-            logger.error('Failed to get commits')
-            return
+            commits = _fallback_commits_from_webhook(object_attributes)
+            if commits:
+                logger.warning('Failed to get commits from GitLab API, falling back to webhook last_commit.')
+            else:
+                logger.error('Failed to get commits')
+                return
 
         review_result = CodexReviewRunner().review(
             repo_preparation.local_path,

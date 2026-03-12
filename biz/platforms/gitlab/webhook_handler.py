@@ -26,8 +26,21 @@ def slugify_url(original_url: str) -> str:
 
 
 def extract_gitlab_project_ref(webhook_data: dict) -> str | None:
+    refs = extract_gitlab_project_refs(webhook_data)
+    return refs[0] if refs else None
+
+
+def extract_gitlab_project_refs(webhook_data: dict) -> list[str]:
     project = webhook_data.get('project', {})
     object_attributes = webhook_data.get('object_attributes', {})
+    refs = []
+
+    def _append_ref(value):
+        if value is None:
+            return
+        ref = quote(str(value).strip('/'), safe='')
+        if ref and ref not in refs:
+            refs.append(ref)
 
     project_path = (
         project.get('path_with_namespace')
@@ -35,16 +48,15 @@ def extract_gitlab_project_ref(webhook_data: dict) -> str | None:
         or object_attributes.get('source', {}).get('path_with_namespace')
     )
     if project_path:
-        return quote(str(project_path).strip('/'), safe='')
+        _append_ref(project_path)
 
-    project_id = (
-        project.get('id')
-        or object_attributes.get('target_project_id')
-        or object_attributes.get('source_project_id')
-    )
-    if project_id is None:
-        return None
-    return quote(str(project_id), safe='')
+    _append_ref(project.get('id'))
+    _append_ref(object_attributes.get('target', {}).get('id'))
+    _append_ref(object_attributes.get('source', {}).get('id'))
+    _append_ref(object_attributes.get('target_project_id'))
+    _append_ref(object_attributes.get('source_project_id'))
+
+    return refs
 
 
 class MergeRequestHandler:
@@ -55,6 +67,7 @@ class MergeRequestHandler:
         self.gitlab_url = gitlab_url
         self.event_type = None
         self.project_ref = None
+        self.project_refs = []
         self.action = None
         self.parse_event_type()
 
@@ -68,8 +81,31 @@ class MergeRequestHandler:
         # 提取 Merge Request 的相关参数
         merge_request = self.webhook_data.get('object_attributes', {})
         self.merge_request_iid = merge_request.get('iid')
-        self.project_ref = extract_gitlab_project_ref(self.webhook_data)
+        self.project_refs = extract_gitlab_project_refs(self.webhook_data)
+        self.project_ref = self.project_refs[0] if self.project_refs else None
         self.action = merge_request.get('action')
+
+    def _merge_request_request(self, resource_path: str, method: str = 'get', **kwargs):
+        headers = kwargs.pop('headers', {})
+        headers = {
+            'Private-Token': self.gitlab_token,
+            **headers,
+        }
+
+        last_response = None
+        attempted_urls = []
+        for project_ref in self.project_refs:
+            url = urljoin(
+                f"{self.gitlab_url}/",
+                f"api/v4/projects/{project_ref}/merge_requests/{self.merge_request_iid}/{resource_path}",
+            )
+            attempted_urls.append(url)
+            response = requests.request(method, url, headers=headers, verify=False, **kwargs)
+            last_response = response
+            if response.status_code != 404:
+                return response, url, attempted_urls
+
+        return last_response, attempted_urls[-1] if attempted_urls else None, attempted_urls
 
     def get_merge_request_changes(self) -> list:
         # 检查是否为 Merge Request Hook 事件
@@ -82,14 +118,20 @@ class MergeRequestHandler:
         retry_delay = 10  # 重试间隔时间（秒）
         for attempt in range(max_retries):
             # 调用 GitLab API 获取 Merge Request 的 changes
-            url = urljoin(f"{self.gitlab_url}/",
-                          f"api/v4/projects/{self.project_ref}/merge_requests/{self.merge_request_iid}/changes?access_raw_diffs=true")
-            headers = {
-                'Private-Token': self.gitlab_token
-            }
-            response = requests.get(url, headers=headers, verify=False)
+            response, url, attempted_urls = self._merge_request_request(
+                "changes?access_raw_diffs=true",
+            )
+            if response is None:
+                logger.warn("Failed to build merge request changes request: no project reference available.")
+                return []
             logger.debug(
-                f"Get changes response from GitLab (attempt {attempt + 1}): {response.status_code}, {response.text}, URL: {url}")
+                "Get changes response from GitLab (attempt %s): %s, %s, URL: %s, attempted_urls=%s",
+                attempt + 1,
+                response.status_code,
+                response.text,
+                url,
+                attempted_urls,
+            )
 
             # 检查请求是否成功
             if response.status_code == 200:
@@ -113,32 +155,41 @@ class MergeRequestHandler:
             return []
 
         # 调用 GitLab API 获取 Merge Request 的 commits
-        url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_ref}/merge_requests/{self.merge_request_iid}/commits")
-        headers = {
-            'Private-Token': self.gitlab_token
-        }
-        response = requests.get(url, headers=headers, verify=False)
-        logger.debug(f"Get commits response from gitlab: {response.status_code}, {response.text}")
+        response, url, attempted_urls = self._merge_request_request("commits")
+        if response is None:
+            logger.warn("Failed to get commits: no project reference available.")
+            return []
+        logger.debug(
+            "Get commits response from gitlab: %s, %s, URL: %s, attempted_urls=%s",
+            response.status_code,
+            response.text,
+            url,
+            attempted_urls,
+        )
         # 检查请求是否成功
         if response.status_code == 200:
             return response.json()
         else:
-            logger.warn(f"Failed to get commits: {response.status_code}, {response.text}")
+            logger.warn(f"Failed to get commits: {response.status_code}, {response.text}, attempted_urls={attempted_urls}")
             return []
 
     def add_merge_request_notes(self, review_result):
-        url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_ref}/merge_requests/{self.merge_request_iid}/notes")
-        headers = {
-            'Private-Token': self.gitlab_token,
-            'Content-Type': 'application/json'
-        }
-        data = {
-            'body': review_result
-        }
-        response = requests.post(url, headers=headers, json=data, verify=False)
-        logger.debug(f"Add notes to gitlab {url}: {response.status_code}, {response.text}")
+        response, url, attempted_urls = self._merge_request_request(
+            "notes",
+            method='post',
+            headers={'Content-Type': 'application/json'},
+            json={'body': review_result},
+        )
+        if response is None:
+            logger.error("Failed to add note: no project reference available.")
+            return
+        logger.debug(
+            "Add notes to gitlab %s: %s, %s, attempted_urls=%s",
+            url,
+            response.status_code,
+            response.text,
+            attempted_urls,
+        )
         if response.status_code == 201:
             logger.info("Note successfully added to merge request.")
         else:
@@ -146,21 +197,44 @@ class MergeRequestHandler:
             logger.error(response.text)
 
     def target_branch_protected(self) -> bool:
-        url = urljoin(f"{self.gitlab_url}/",
-                      f"api/v4/projects/{self.project_ref}/protected_branches")
-        headers = {
-            'Private-Token': self.gitlab_token,
-            'Content-Type': 'application/json'
-        }
-        response = requests.get(url, headers=headers, verify=False)
-        logger.debug(f"Get protected branches response from gitlab: {response.status_code}, {response.text}")
+        last_response = None
+        attempted_urls = []
+        for project_ref in self.project_refs:
+            url = urljoin(f"{self.gitlab_url}/", f"api/v4/projects/{project_ref}/protected_branches")
+            attempted_urls.append(url)
+            response = requests.get(
+                url,
+                headers={
+                    'Private-Token': self.gitlab_token,
+                    'Content-Type': 'application/json',
+                },
+                verify=False,
+            )
+            last_response = response
+            if response.status_code != 404:
+                break
+
+        if last_response is None:
+            logger.warn("Failed to get protected branches: no project reference available.")
+            return False
+        logger.debug(
+            "Get protected branches response from gitlab: %s, %s, attempted_urls=%s",
+            last_response.status_code,
+            last_response.text,
+            attempted_urls,
+        )
         # 检查请求是否成功
-        if response.status_code == 200:
-            data = response.json()
+        if last_response.status_code == 200:
+            data = last_response.json()
             target_branch = self.webhook_data['object_attributes']['target_branch']
             return any(fnmatch.fnmatch(target_branch, item['name']) for item in data)
         else:
-            logger.warn(f"Failed to get protected branches: {response.status_code}, {response.text}")
+            logger.warn(
+                "Failed to get protected branches: %s, %s, attempted_urls=%s",
+                last_response.status_code,
+                last_response.text,
+                attempted_urls,
+            )
             return False
 
 
