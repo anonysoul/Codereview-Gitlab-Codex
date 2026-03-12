@@ -82,6 +82,7 @@ class TestGitLabRepoCacheManager(TestCase):
             repo_path = Path(prepared.local_path)
             self.assertTrue((repo_path / ".git").exists())
             self.assertEqual(run_git(["rev-parse", "HEAD"], cwd=repo_path), last_commit_id)
+            self.assertEqual(prepared.base_ref, "origin/main")
 
     def test_prepare_merge_request_repo_fetches_existing_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -140,6 +141,62 @@ class TestGitLabRepoCacheManager(TestCase):
                 run_git(["rev-parse", "HEAD"], cwd=Path(prepared.local_path)),
                 second_commit_id,
             )
+
+    def test_collect_supported_diff_stats_ignores_unsupported_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            remote_repo = tmp_path / "remote.git"
+            worktree = tmp_path / "worktree"
+            cache_dir = tmp_path / "cache"
+
+            run_git(["init", "--bare", str(remote_repo)], cwd=tmp_path)
+            run_git(["clone", str(remote_repo), str(worktree)], cwd=tmp_path)
+            run_git(["config", "user.name", "tester"], cwd=worktree)
+            run_git(["config", "user.email", "tester@example.com"], cwd=worktree)
+
+            (worktree / "README.md").write_text("base\n", encoding="utf-8")
+            run_git(["add", "README.md"], cwd=worktree)
+            run_git(["commit", "-m", "base"], cwd=worktree)
+            run_git(["branch", "-M", "main"], cwd=worktree)
+            run_git(["push", "-u", "origin", "main"], cwd=worktree)
+
+            run_git(["checkout", "-b", "feature/test"], cwd=worktree)
+            (worktree / "code.py").write_text("print('ok')\n", encoding="utf-8")
+            (worktree / "notes.txt").write_text("ignore me\n", encoding="utf-8")
+            run_git(["add", "code.py", "notes.txt"], cwd=worktree)
+            run_git(["commit", "-m", "feature"], cwd=worktree)
+            last_commit_id = run_git(["rev-parse", "HEAD"], cwd=worktree)
+            run_git(["push", "-u", "origin", "feature/test"], cwd=worktree)
+
+            manager = GitLabRepoCacheManager("https://gitlab.example.com", "token")
+            webhook_data = {
+                "project": {
+                    "id": 1,
+                    "path_with_namespace": "group/project",
+                    "git_http_url": str(remote_repo),
+                },
+                "object_attributes": {
+                    "target_project_id": 1,
+                    "source_branch": "feature/test",
+                    "target_branch": "main",
+                    "last_commit": {"id": last_commit_id},
+                },
+            }
+
+            with patch.dict(
+                os.environ,
+                {
+                    "CODEREVIEW_CACHE_DIR": str(cache_dir),
+                    "SUPPORTED_EXTENSIONS": ".py,.js",
+                },
+                clear=False,
+            ):
+                prepared = manager.prepare_merge_request_repo(webhook_data)
+                diff_stats = manager.collect_supported_diff_stats(prepared.local_path, "main")
+
+            self.assertEqual(diff_stats.changed_files, ["code.py"])
+            self.assertEqual(diff_stats.additions, 1)
+            self.assertEqual(diff_stats.deletions, 0)
 
     @patch("biz.platforms.gitlab.repo_cache.requests.get")
     def test_prepare_merge_request_repo_falls_back_to_gitlab_api(self, mock_get):

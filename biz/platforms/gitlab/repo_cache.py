@@ -22,6 +22,14 @@ class RepoPreparationResult:
     target_branch: str
     source_branch: str
     last_commit_id: str
+    base_ref: str
+
+
+@dataclass
+class RepoDiffStats:
+    additions: int
+    deletions: int
+    changed_files: list[str]
 
 
 def get_cache_root() -> Path:
@@ -68,7 +76,21 @@ class GitLabRepoCacheManager:
             target_branch=target_branch,
             source_branch=source_branch,
             last_commit_id=last_commit_id,
+            base_ref=self.build_base_ref(target_branch),
         )
+
+    def collect_supported_diff_stats(self, repo_path: str, target_branch: str) -> RepoDiffStats:
+        base_ref = self.build_base_ref(target_branch)
+        changed_files = self._list_supported_files(repo_path, base_ref)
+        additions, deletions = self._collect_numstat(repo_path, base_ref, changed_files)
+        return RepoDiffStats(
+            additions=additions,
+            deletions=deletions,
+            changed_files=changed_files,
+        )
+
+    def build_base_ref(self, target_branch: str) -> str:
+        return f"origin/{target_branch}"
 
     def _get_project_id(self, webhook_data: dict):
         project = webhook_data.get("project", {})
@@ -161,6 +183,43 @@ class GitLabRepoCacheManager:
         self._run_git(["checkout", "--force", last_commit_id], cwd=repo_dir)
         self._run_git(["clean", "-fd"], cwd=repo_dir)
 
+    def _list_supported_files(self, repo_path: str, base_ref: str) -> list[str]:
+        result = self._run_git(
+            ["diff", "--name-only", "--diff-filter=ACMR", f"{base_ref}...HEAD"],
+            cwd=Path(repo_path),
+        )
+        supported_extensions = os.getenv("SUPPORTED_EXTENSIONS", ".java,.py,.php").split(",")
+        files = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return [
+            file_path
+            for file_path in files
+            if any(file_path.endswith(ext) for ext in supported_extensions)
+        ]
+
+    def _collect_numstat(self, repo_path: str, base_ref: str, changed_files: list[str]) -> tuple[int, int]:
+        if not changed_files:
+            return 0, 0
+
+        result = self._run_git(
+            ["diff", "--numstat", "--diff-filter=ACMR", f"{base_ref}...HEAD"],
+            cwd=Path(repo_path),
+        )
+        additions = 0
+        deletions = 0
+        changed_file_set = set(changed_files)
+
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            added, deleted, path = parts[0], parts[1], parts[2]
+            if path not in changed_file_set:
+                continue
+            additions += 0 if added == "-" else int(added)
+            deletions += 0 if deleted == "-" else int(deleted)
+
+        return additions, deletions
+
     def _git_env(self) -> dict:
         env = os.environ.copy()
         auth = base64.b64encode(f"oauth2:{self.gitlab_token}".encode("utf-8")).decode("ascii")
@@ -182,3 +241,4 @@ class GitLabRepoCacheManager:
             raise RuntimeError(
                 f"Git command failed: {' '.join(command)}\nstdout: {result.stdout}\nstderr: {result.stderr}"
             )
+        return result

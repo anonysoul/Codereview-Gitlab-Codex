@@ -6,9 +6,9 @@ from biz.entity.review_entity import MergeRequestReviewEntity
 from biz.event.event_manager import event_manager
 from biz.platforms.gitlab.repo_cache import GitLabRepoCacheManager
 from biz.platforms.gitlab.review_trigger import should_review_gitlab_merge_request
-from biz.platforms.gitlab.webhook_handler import MergeRequestHandler, filter_changes
+from biz.platforms.gitlab.webhook_handler import MergeRequestHandler
 from biz.service.review_service import ReviewService
-from biz.utils.code_reviewer import CodeReviewer
+from biz.utils.codex_runner import CodexReviewRunner
 from biz.utils.log import logger
 
 
@@ -22,6 +22,7 @@ def handle_merge_request_event(
     merge_review_only_protected_branches = (
         os.environ.get('MERGE_REVIEW_ONLY_PROTECTED_BRANCHES_ENABLED', '0') == '1'
     )
+    handler = None
 
     try:
         handler = MergeRequestHandler(webhook_data, gitlab_token, gitlab_url)
@@ -71,9 +72,8 @@ def handle_merge_request_event(
                 )
                 return
 
-        repo_preparation = GitLabRepoCacheManager(gitlab_url, gitlab_token).prepare_merge_request_repo(
-            webhook_data
-        )
+        repo_cache_manager = GitLabRepoCacheManager(gitlab_url, gitlab_token)
+        repo_preparation = repo_cache_manager.prepare_merge_request_repo(webhook_data)
         logger.info(
             "Prepared cached repository for MR review: %s (source=%s target=%s commit=%s)",
             repo_preparation.local_path,
@@ -82,27 +82,24 @@ def handle_merge_request_event(
             repo_preparation.last_commit_id,
         )
 
-        changes = handler.get_merge_request_changes()
-        logger.info('changes: %s', changes)
-        changes = filter_changes(changes)
-        if not changes:
-            logger.info('未检测到有关代码的修改,修改文件可能不满足SUPPORTED_EXTENSIONS。')
+        diff_stats = repo_cache_manager.collect_supported_diff_stats(
+            repo_preparation.local_path,
+            repo_preparation.target_branch,
+        )
+        if not diff_stats.changed_files:
+            logger.info('未检测到有关代码的修改, 修改文件可能不满足 SUPPORTED_EXTENSIONS。')
             return
-
-        additions = 0
-        deletions = 0
-        for item in changes:
-            additions += item.get('additions', 0)
-            deletions += item.get('deletions', 0)
 
         commits = handler.get_merge_request_commits()
         if not commits:
             logger.error('Failed to get commits')
             return
 
-        commits_text = ';'.join(commit['title'] for commit in commits)
-        review_result = CodeReviewer().review_and_strip_code(str(changes), commits_text)
-        handler.add_merge_request_notes(f'Auto Review Result: \n{review_result}')
+        review_result = CodexReviewRunner().review(
+            repo_preparation.local_path,
+            repo_preparation.base_ref,
+        )
+        handler.add_merge_request_notes(review_result)
 
         event_manager['merge_request_reviewed'].send(
             MergeRequestReviewEntity(
@@ -112,16 +109,20 @@ def handle_merge_request_event(
                 target_branch=webhook_data['object_attributes']['target_branch'],
                 updated_at=int(datetime.now().timestamp()),
                 commits=commits,
-                score=CodeReviewer.parse_review_score(review_text=review_result),
+                score=0,
                 url=webhook_data['object_attributes']['url'],
                 review_result=review_result,
                 url_slug=gitlab_url_slug,
                 webhook_data=webhook_data,
-                additions=additions,
-                deletions=deletions,
+                additions=diff_stats.additions,
+                deletions=diff_stats.deletions,
                 last_commit_id=last_commit_id,
             )
         )
     except Exception as e:
-        error_message = f'AI Code Review 服务出现未知错误: {str(e)}\n{traceback.format_exc()}'
-        logger.error('出现未知错误: %s', error_message)
+        logger.error('MR review failed: %s\n%s', str(e), traceback.format_exc())
+        if handler is not None:
+            try:
+                handler.add_merge_request_notes(f'自动审查失败：{str(e)}')
+            except Exception:
+                logger.error('Failed to add failure note to merge request.\n%s', traceback.format_exc())

@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request
 from biz.platforms.gitlab.webhook_handler import slugify_url
 from biz.queue.worker import handle_merge_request_event
 from biz.utils.log import logger
-from biz.utils.queue import handle_queue
+from biz.utils.queue import build_merge_request_task_key, handle_queue
 
 webhook_bp = Blueprint('webhook', __name__)
 
@@ -60,7 +60,15 @@ def handle_gitlab_webhook(data):
         logger.error(error_message)
         return jsonify(error_message), 400
 
-    handle_queue(handle_merge_request_event, data, gitlab_token, gitlab_url, gitlab_url_slug)
+    task_key = build_merge_request_task_key(data, gitlab_url_slug)
+    handle_queue(
+        handle_merge_request_event,
+        data,
+        gitlab_token,
+        gitlab_url,
+        gitlab_url_slug,
+        task_key=task_key,
+    )
     return jsonify(
         {'message': f'Request received(object_kind={object_kind}), will process asynchronously.'}
     ), 200
