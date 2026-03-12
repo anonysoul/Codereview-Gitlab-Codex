@@ -52,12 +52,17 @@ def handle_merge_request_event(
             logger.info("Merge Request target branch not match protected branches, ignored.")
             return
 
-        if not should_review_gitlab_merge_request(object_attributes, handler.action):
+        if not should_review_gitlab_merge_request(
+            object_attributes,
+            handler.action,
+            webhook_data.get('changes', {}),
+        ):
             logger.info(
-                "Merge Request Hook event ignored: action=%s, oldrev=%s, last_commit_id=%s.",
+                "Merge Request Hook event ignored: action=%s, oldrev=%s, last_commit_id=%s, change_keys=%s.",
                 handler.action,
                 object_attributes.get('oldrev', ''),
                 object_attributes.get('last_commit', {}).get('id', ''),
+                sorted(webhook_data.get('changes', {}).keys()),
             )
             return
 

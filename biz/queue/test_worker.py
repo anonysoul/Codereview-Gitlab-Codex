@@ -36,7 +36,8 @@ class TestShouldReviewGitlabMergeRequest(TestCase):
             {
                 'last_commit': {'id': 'def456'}
             },
-            'update'
+            'update',
+            {'last_commit': {'previous': {'id': 'abc123'}, 'current': {'id': 'def456'}}},
         )
 
         self.assertTrue(should_review)
@@ -47,10 +48,21 @@ class TestShouldReviewGitlabMergeRequest(TestCase):
                 'oldrev': 'abc123',
                 'last_commit': {'id': 'def456'}
             },
-            'update'
+            'update',
         )
 
         self.assertTrue(should_review)
+
+    def test_ignore_update_without_oldrev_or_last_commit_change(self):
+        should_review = should_review_gitlab_merge_request(
+            {
+                'last_commit': {'id': 'def456'}
+            },
+            'update',
+            {'updated_at': {'previous': '1', 'current': '2'}},
+        )
+
+        self.assertFalse(should_review)
 
     def test_ignore_non_reviewable_action(self):
         should_review = should_review_gitlab_merge_request(
@@ -224,6 +236,9 @@ class TestHandleMergeRequestEvent(TestCase):
                 "source_branch": "feature/test",
                 "target_branch": "main",
                 "url": "https://gitlab.example.com/demo/-/merge_requests/1",
+            },
+            "changes": {
+                "last_commit": {"previous": {"id": "oldrev"}, "current": {"id": "newrev"}},
             },
         }
 

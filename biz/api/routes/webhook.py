@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, jsonify, request
 
+from biz.platforms.gitlab.review_trigger import should_review_gitlab_merge_request
 from biz.platforms.gitlab.webhook_handler import slugify_url
 from biz.queue.worker import handle_merge_request_event
 from biz.utils.log import logger
@@ -59,6 +60,23 @@ def handle_gitlab_webhook(data):
         )
         logger.error(error_message)
         return jsonify(error_message), 400
+
+    object_attributes = data.get("object_attributes", {})
+    if not should_review_gitlab_merge_request(
+        object_attributes,
+        object_attributes.get("action"),
+        data.get("changes", {}),
+    ):
+        logger.info(
+            "Ignoring non-reviewable merge_request webhook before queueing: action=%s oldrev=%s last_commit_id=%s change_keys=%s",
+            object_attributes.get("action"),
+            object_attributes.get("oldrev", ""),
+            object_attributes.get("last_commit", {}).get("id", ""),
+            sorted(data.get("changes", {}).keys()),
+        )
+        return jsonify(
+            {'message': 'Merge request event ignored because it does not carry a reviewable commit update.'}
+        ), 200
 
     task_key = build_merge_request_task_key(data, gitlab_url_slug)
     handle_queue(
